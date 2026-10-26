@@ -1,0 +1,22 @@
+services:
+  pocket-dev:
+    build: .
+    container_name: pocket-dev
+    # LAN 内のスマホ・タブレットから接続する設定。
+    # このPCからだけ使う場合は "127.0.0.1:8765:8765" に変更する。
+    ports:
+      - "8765:8765"
+    volumes:
+      # 作業ファイル。ホスト側に残るので、タブレットで編集した結果もここに入る
+      - ./workspace:/workspace
+      # ホームディレクトリ（.bashrc, .gitconfig, SSH鍵など）を永続化
+      - pocketdev-home:/root
+    environment:
+      # .env に POCKETDEV_TOKEN を書くとURLが固定される（未設定なら起動ごとに自動生成）
+      POCKETDEV_TOKEN: ${POCKETDEV_TOKEN:-}
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+
+volumes:
+  pocketdev-home:

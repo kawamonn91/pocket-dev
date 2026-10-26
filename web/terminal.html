@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0f1117">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<title>pocket-dev ターミナル</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #161922;
+    --border: #2b3040;
+    --text: #e4e7ef;
+    --muted: #8b93a7;
+    --accent: #4ade80;
+    --danger: #f87171;
+    --key-h: 40px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif;
+  }
+  #app {
+    display: flex; flex-direction: column;
+    height: 100dvh;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; background: var(--panel);
+    border-bottom: 1px solid var(--border); flex: 0 0 auto;
+  }
+  #status {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--muted);
+    min-width: 0; flex: 1 1 auto;
+  }
+  #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+  #dot.online { background: var(--accent); }
+  #dot.offline { background: var(--danger); }
+  #statusText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  header button {
+    background: #222634; color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 9px; font-size: 13px; flex: 0 0 auto;
+  }
+  header button:active { background: #2d3344; }
+  #terminal { flex: 1 1 auto; min-height: 0; padding: 4px 2px 0 6px; }
+  #keybar {
+    flex: 0 0 auto; display: flex; gap: 6px;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    background: var(--panel); border-top: 1px solid var(--border);
+    overflow-x: auto; scrollbar-width: none;
+  }
+  #keybar::-webkit-scrollbar { display: none; }
+  #keybar button {
+    flex: 0 0 auto; min-width: 46px; height: var(--key-h);
+    background: #222634; color: var(--text);
+    border: 1px solid var(--border); border-radius: 7px;
+    font-size: 14px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  #keybar button:active { background: #343b4f; }
+  #keybar button.sticky-on {
+    background: var(--accent); color: #0b1220;
+    border-color: var(--accent); font-weight: 700;
+  }
+  #overlay {
+    position: fixed; inset: 0; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(10, 12, 18, 0.88); z-index: 10; padding: 24px;
+  }
+  #overlay.visible { display: flex; }
+  #overlayCard {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; max-width: 360px; text-align: center;
+  }
+  #overlayCard p { margin: 0 0 16px; font-size: 14px; line-height: 1.6; color: var(--muted); }
+  #overlayCard button {
+    background: var(--accent); color: #0b1220; font-weight: 700;
+    border: 0; border-radius: 8px; padding: 10px 18px; font-size: 15px;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div id="status"><span id="dot"></span><span id="statusText">接続中...</span></div>
+    <button id="fontMinus" aria-label="文字を小さく">A-</button>
+    <button id="fontPlus" aria-label="文字を大きく">A+</button>
+    <button id="openIde" aria-label="IDEを開く">IDE</button>
+  </header>
+
+  <div id="terminal"></div>
+
+  <div id="keybar">
+    <button data-key="Escape">esc</button>
+    <button data-key="Tab">tab</button>
+    <button data-sticky="ctrl">ctrl</button>
+    <button data-sticky="alt">alt</button>
+    <button data-key="ArrowUp">↑</button>
+    <button data-key="ArrowDown">↓</button>
+    <button data-key="ArrowLeft">←</button>
+    <button data-key="ArrowRight">→</button>
+    <button data-key="CtrlC">^C</button>
+    <button data-key="CtrlD">^D</button>
+    <button data-text="|">|</button>
+    <button data-text="~">~</button>
+    <button data-text="/">/</button>
+    <button data-text="-">-</button>
+    <button data-text="&quot;">"</button>
+    <button data-key="Home">home</button>
+    <button data-key="End">end</button>
+  </div>
+</div>
+
+<div id="overlay">
+  <div id="overlayCard">
+    <p id="overlayText"></p>
+    <button id="reconnect">再接続</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  const FONT_SIZE_KEY = "pocketdev.fontSize";
+  const MIN_FONT = 9;
+  const MAX_FONT = 22;
+  const RECONNECT_BASE_MS = 500;
+  const RECONNECT_MAX_MS = 10000;
+
+  // ローカル設定の読み書き（プライベートモード等で例外になるため必ず保護する）
+  function loadFontSize() {
+    try {
+      const stored = parseInt(localStorage.getItem(FONT_SIZE_KEY), 10);
+      if (stored >= MIN_FONT && stored <= MAX_FONT) return stored;
+    } catch (e) { /* 利用できない環境では既定値を使う */ }
+    return window.innerWidth < 480 ? 12 : 14;
+  }
+  function saveFontSize(size) {
+    try { localStorage.setItem(FONT_SIZE_KEY, String(size)); } catch (e) { /* 保存できなくても動作に影響しない */ }
+  }
+
+  const term = new Terminal({
+    fontSize: loadFontSize(),
+    fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, "Noto Sans Mono CJK JP", monospace',
+    cursorBlink: true,
+    scrollback: 5000,
+    macOptionIsMeta: true,
+    allowProposedApi: true,
+    theme: {
+      background: "#0f1117", foreground: "#e4e7ef", cursor: "#4ade80",
+      selectionBackground: "#2f3b54",
+      black: "#1b1f2a", red: "#f87171", green: "#4ade80", yellow: "#fbbf24",
+      blue: "#60a5fa", magenta: "#c084fc", cyan: "#22d3ee", white: "#e4e7ef",
+      brightBlack: "#64748b", brightRed: "#fca5a5", brightGreen: "#86efac",
+      brightYellow: "#fcd34d", brightBlue: "#93c5fd", brightMagenta: "#d8b4fe",
+      brightCyan: "#67e8f9", brightWhite: "#f8fafc"
+    }
+  });
+
+  const fitAddon = new FitAddon.FitAddon();
+  term.loadAddon(fitAddon);
+  term.loadAddon(new WebLinksAddon.WebLinksAddon());
+  term.open(document.getElementById("terminal"));
+
+  const dot = document.getElementById("dot");
+  const statusText = document.getElementById("statusText");
+  const overlay = document.getElementById("overlay");
+  const overlayText = document.getElementById("overlayText");
+
+  let socket = null;
+  let reconnectDelay = RECONNECT_BASE_MS;
+  let reconnectTimer = null;
+  let manuallyClosed = false;
+  const sticky = { ctrl: false, alt: false };
+
+  function setStatus(state, message) {
+    dot.className = state;
+    statusText.textContent = message;
+  }
+
+  function showOverlay(message) {
+    overlayText.textContent = message;
+    overlay.classList.add("visible");
+  }
+
+  function hideOverlay() {
+    overlay.classList.remove("visible");
+  }
+
+  // ---------------------------------------------------------------- 接続
+
+  function connect() {
+    clearTimeout(reconnectTimer);
+    manuallyClosed = false;
+    setStatus("", "接続中...");
+
+    const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+    // 認証トークンは HttpOnly Cookie で自動送信されるため URL には載せない
+    const url = `${scheme}//${location.host}/ws/pty?cols=${term.cols}&rows=${term.rows}`;
+    socket = new WebSocket(url);
+    socket.binaryType = "arraybuffer";
+
+    socket.onopen = function () {
+      reconnectDelay = RECONNECT_BASE_MS;
+      hideOverlay();
+      setStatus("online", `${location.host} に接続`);
+      sendResize();
+      term.focus();
+    };
+
+    socket.onmessage = function (event) {
+      if (typeof event.data === "string") {
+        handleControlMessage(event.data);
+        return;
+      }
+      term.write(new Uint8Array(event.data));
+    };
+
+    socket.onclose = function () {
+      setStatus("offline", "切断されました");
+      if (!manuallyClosed) scheduleReconnect();
+    };
+
+    socket.onerror = function () {
+      setStatus("offline", "接続エラー");
+    };
+  }
+
+  function handleControlMessage(raw) {
+    let message;
+    try { message = JSON.parse(raw); } catch (e) { return; }
+    if (message.type === "exit") {
+      manuallyClosed = true;
+      setStatus("offline", "シェルが終了しました");
+      showOverlay("シェルが終了しました。新しいセッションを開始できます。");
+    }
+  }
+
+  function scheduleReconnect() {
+    showOverlay(`接続が切れました。${Math.round(reconnectDelay / 1000)} 秒後に再接続します。`);
+    reconnectTimer = setTimeout(function () {
+      reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
+      connect();
+    }, reconnectDelay);
+  }
+
+  function send(payload) {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(payload));
+    }
+  }
+
+  function sendResize() {
+    send({ type: "resize", cols: term.cols, rows: term.rows });
+  }
+
+  // ------------------------------------------------------------ 入力処理
+
+  function sendInput(data) {
+    send({ type: "input", data: data });
+  }
+
+  term.onData(function (data) {
+    // ソフトキーボードには Ctrl/Alt が無いため、キーバーの状態を適用する
+    if (sticky.ctrl && data.length === 1) {
+      const code = data.toUpperCase().charCodeAt(0);
+      if (code >= 64 && code <= 95) data = String.fromCharCode(code & 0x1f);
+      else if (code === 63) data = String.fromCharCode(127);
+      releaseSticky("ctrl");
+    }
+    if (sticky.alt && data.length === 1) {
+      data = "\u001b" + data;
+      releaseSticky("alt");
+    }
+    sendInput(data);
+  });
+
+  const KEY_SEQUENCES = {
+    Escape: "\u001b",
+    Tab: "\t",
+    Enter: "\r",
+    Backspace: "\u007f",
+    ArrowUp: "\u001b[A",
+    ArrowDown: "\u001b[B",
+    ArrowRight: "\u001b[C",
+    ArrowLeft: "\u001b[D",
+    Home: "\u001b[H",
+    End: "\u001b[F",
+    PageUp: "\u001b[5~",
+    PageDown: "\u001b[6~",
+    CtrlC: "\u0003",
+    CtrlD: "\u0004"
+  };
+
+  function releaseSticky(name) {
+    sticky[name] = false;
+    const button = document.querySelector(`[data-sticky="${name}"]`);
+    if (button) button.classList.remove("sticky-on");
+  }
+
+  document.getElementById("keybar").addEventListener("click", function (event) {
+    const button = event.target.closest("button");
+    if (!button) return;
+
+    const stickyName = button.dataset.sticky;
+    if (stickyName) {
+      sticky[stickyName] = !sticky[stickyName];
+      button.classList.toggle("sticky-on", sticky[stickyName]);
+      term.focus();
+      return;
+    }
+
+    const key = button.dataset.key;
+    const text = button.dataset.text;
+    if (key && KEY_SEQUENCES[key]) sendInput(KEY_SEQUENCES[key]);
+    else if (text) sendInput(text);
+    term.focus();
+  });
+
+  // ------------------------------------------------------------ 画面サイズ
+
+  let fitTimer = null;
+  function scheduleFit() {
+    clearTimeout(fitTimer);
+    fitTimer = setTimeout(function () {
+      try { fitAddon.fit(); } catch (e) { /* 非表示時は失敗することがある */ }
+      sendResize();
+    }, 80);
+  }
+
+  window.addEventListener("resize", scheduleFit);
+  window.addEventListener("orientationchange", scheduleFit);
+  // ソフトキーボードの開閉で可視領域が変わるため、こちらも監視する
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", scheduleFit);
+  }
+
+  function changeFontSize(delta) {
+    const next = Math.min(MAX_FONT, Math.max(MIN_FONT, term.options.fontSize + delta));
+    term.options.fontSize = next;
+    saveFontSize(next);
+    scheduleFit();
+  }
+
+  document.getElementById("fontPlus").addEventListener("click", function () { changeFontSize(1); });
+  document.getElementById("fontMinus").addEventListener("click", function () { changeFontSize(-1); });
+  document.getElementById("openIde").addEventListener("click", function () { location.href = "ide.html"; });
+  document.getElementById("reconnect").addEventListener("click", function () {
+    reconnectDelay = RECONNECT_BASE_MS;
+    connect();
+  });
+
+  // スリープ復帰時に切断されたままになるのを防ぐ
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible" &&
+        (!socket || socket.readyState === WebSocket.CLOSED)) {
+      reconnectDelay = RECONNECT_BASE_MS;
+      connect();
+    }
+  });
+
+  scheduleFit();
+  connect();
+})();
+</script>
+</body>
+</html>

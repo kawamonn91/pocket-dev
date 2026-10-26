@@ -1,0 +1,759 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1117">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<title>pocket-dev IDE</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #161922;
+    --panel-2: #1b1f2a;
+    --border: #2b3040;
+    --text: #e4e7ef;
+    --muted: #8b93a7;
+    --accent: #4ade80;
+    --accent-dim: #22c55e;
+    --danger: #f87171;
+    --sidebar-w: 260px;
+    --term-h: 240px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif; font-size: 14px; }
+  button { font-family: inherit; }
+
+  #app { display: flex; flex-direction: column; height: 100dvh;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+
+  /* ------------------------------------------------------------- ヘッダ */
+  #topbar { flex: 0 0 auto; display: flex; align-items: center; gap: 6px;
+    padding: 7px 8px; background: var(--panel); border-bottom: 1px solid var(--border); }
+  #topbar .spacer { flex: 1 1 auto; }
+  .tb-btn { background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 10px; font-size: 13px; white-space: nowrap; }
+  .tb-btn:active { background: #2d3344; }
+  .tb-btn.primary { background: var(--accent-dim); border-color: var(--accent-dim); color: #06240f; font-weight: 700; }
+  .tb-btn:disabled { opacity: .45; }
+  #pathLabel { font-size: 12px; color: var(--muted); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+  /* ------------------------------------------------------------- 本体 */
+  #body { flex: 1 1 auto; display: flex; min-height: 0; position: relative; }
+
+  #sidebar { flex: 0 0 var(--sidebar-w); display: flex; flex-direction: column;
+    background: var(--panel); border-right: 1px solid var(--border); min-height: 0; }
+  #sidebar.hidden { display: none; }
+  #sidebarHead { flex: 0 0 auto; display: flex; gap: 4px; padding: 6px;
+    border-bottom: 1px solid var(--border); }
+  #sidebarHead button { flex: 1 1 auto; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 7px 0; font-size: 12px; }
+  #tree { flex: 1 1 auto; overflow: auto; padding: 4px 0 24px; -webkit-overflow-scrolling: touch; }
+  .node { display: flex; align-items: center; gap: 6px; padding: 7px 8px;
+    cursor: pointer; font-size: 13px; user-select: none; }
+  .node:active { background: #232838; }
+  .node.active { background: #273047; }
+  .node .twisty { width: 14px; text-align: center; color: var(--muted); flex: 0 0 auto; font-size: 10px; }
+  .node .icon { flex: 0 0 auto; width: 16px; text-align: center; }
+  .node .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .node.dir .name { color: #cbd5e1; }
+  .children { display: none; }
+  .children.open { display: block; }
+
+  #main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  #tabs { flex: 0 0 auto; display: flex; overflow-x: auto; background: var(--panel-2);
+    border-bottom: 1px solid var(--border); scrollbar-width: none; }
+  #tabs::-webkit-scrollbar { display: none; }
+  .tab { display: flex; align-items: center; gap: 6px; padding: 8px 10px;
+    border-right: 1px solid var(--border); font-size: 12px; color: var(--muted);
+    white-space: nowrap; flex: 0 0 auto; }
+  .tab.active { background: var(--bg); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+  .tab .dirty { color: var(--accent); }
+  .tab .close { padding: 0 4px; color: var(--muted); font-size: 14px; }
+
+  #viewer { flex: 1 1 auto; min-height: 0; position: relative; }
+  #editor { position: absolute; inset: 0; }
+  #preview { position: absolute; inset: 0; display: none; overflow: auto;
+    background: #0b0d12; text-align: center; padding: 12px; -webkit-overflow-scrolling: touch; }
+  #preview.visible { display: block; }
+  #preview canvas { max-width: 100%; height: auto; margin: 0 auto 12px; display: block;
+    background: #fff; border-radius: 4px; }
+  #preview img { max-width: 100%; height: auto; }
+  #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 13px; text-align: center; padding: 24px; }
+  #empty.hidden { display: none; }
+
+  /* --------------------------------------------------------- ターミナル */
+  #termPanel { flex: 0 0 auto; height: var(--term-h); display: none;
+    flex-direction: column; border-top: 1px solid var(--border); background: var(--panel); }
+  #termPanel.visible { display: flex; }
+  #termHead { flex: 0 0 auto; display: flex; align-items: center; gap: 6px;
+    padding: 5px 8px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+  #termHead .spacer { flex: 1 1 auto; }
+  #termHead button { background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 5px; padding: 5px 8px; font-size: 12px; }
+  #terminal { flex: 1 1 auto; min-height: 0; padding: 4px 2px 0 6px; }
+
+  /* ------------------------------------------------------------ 共通UI */
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    background: #242a38; color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 16px; font-size: 13px; opacity: 0;
+    transition: opacity .2s; pointer-events: none; z-index: 50; max-width: 90vw; }
+  #toast.visible { opacity: 1; }
+  #toast.error { border-color: var(--danger); color: #fecaca; }
+
+  #sheet { position: fixed; inset: 0; background: rgba(8, 10, 15, .7);
+    display: none; align-items: center; justify-content: center; z-index: 40; padding: 20px; }
+  #sheet.visible { display: flex; }
+  #sheetCard { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px; width: 100%; max-width: 380px; }
+  #sheetTitle { font-size: 14px; font-weight: 700; margin-bottom: 12px; }
+  #sheetInput { width: 100%; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 7px; padding: 10px; font-size: 15px; }
+  #sheetActions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+
+  /* 画面が狭い端末ではサイドバーを重ねて表示する */
+  @media (max-width: 720px) {
+    #sidebar { position: absolute; z-index: 20; top: 0; bottom: 0; left: 0;
+      width: 82vw; flex-basis: 82vw; box-shadow: 0 0 40px rgba(0,0,0,.6); }
+    #pathLabel { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <button class="tb-btn" id="toggleSidebar" aria-label="ファイル一覧">☰</button>
+    <span id="pathLabel">—</span>
+    <span class="spacer"></span>
+    <button class="tb-btn" id="openTerminal" aria-label="ターミナルへ">⌨</button>
+    <button class="tb-btn" id="toggleTerm">▣ 実行</button>
+    <button class="tb-btn primary" id="saveBtn" disabled>保存</button>
+  </div>
+
+  <div id="body">
+    <aside id="sidebar">
+      <div id="sidebarHead">
+        <button id="refreshTree">↻ 更新</button>
+        <button id="newFile">＋ ファイル</button>
+        <button id="newDir">＋ 階層</button>
+      </div>
+      <div id="tree"></div>
+    </aside>
+
+    <div id="main">
+      <div id="tabs"></div>
+      <div id="viewer">
+        <div id="editor"></div>
+        <div id="preview"></div>
+        <div id="empty">左の一覧からファイルを選ぶと、ここで編集できます</div>
+      </div>
+      <div id="termPanel">
+        <div id="termHead">
+          <span id="termStatus">未接続</span>
+          <span class="spacer"></span>
+          <button id="runFile">▶ このファイルを実行</button>
+          <button id="termClose">✕</button>
+        </div>
+        <div id="terminal"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div id="sheet">
+  <div id="sheetCard">
+    <div id="sheetTitle"></div>
+    <input id="sheetInput" autocapitalize="off" autocomplete="off" spellcheck="false">
+    <div id="sheetActions">
+      <button class="tb-btn" id="sheetCancel">キャンセル</button>
+      <button class="tb-btn primary" id="sheetOk">OK</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/loader.min.js"></script>
+<script type="module">
+import * as pdfjs from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
+pdfjs.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
+window.pdfjsLib = pdfjs;
+</script>
+<script>
+(function () {
+  "use strict";
+
+  /* ================================================================ API */
+
+  const api = {
+    async get(path, params) {
+      const url = new URL(path, location.origin);
+      Object.entries(params || {}).forEach(([k, v]) => url.searchParams.set(k, v));
+      const response = await fetch(url, { credentials: "same-origin" });
+      return unwrap(response);
+    },
+    async post(path, body) {
+      const response = await fetch(path, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return unwrap(response);
+    },
+  };
+
+  async function unwrap(response) {
+    let payload = null;
+    try { payload = await response.json(); } catch (e) { /* JSON 以外の応答 */ }
+    if (!response.ok || !payload || payload.ok === false) {
+      throw new Error((payload && payload.error) || `通信に失敗しました (${response.status})`);
+    }
+    return payload;
+  }
+
+  /* ============================================================== 表示系 */
+
+  const toast = document.getElementById("toast");
+  let toastTimer = null;
+
+  function notify(message, isError) {
+    toast.textContent = message;
+    toast.classList.toggle("error", !!isError);
+    toast.classList.add("visible");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove("visible"), isError ? 5000 : 2200);
+  }
+
+  const sheet = document.getElementById("sheet");
+  const sheetTitle = document.getElementById("sheetTitle");
+  const sheetInput = document.getElementById("sheetInput");
+  let sheetResolve = null;
+
+  function prompt(title, initial) {
+    sheetTitle.textContent = title;
+    sheetInput.value = initial || "";
+    sheet.classList.add("visible");
+    sheetInput.focus();
+    return new Promise((resolve) => { sheetResolve = resolve; });
+  }
+
+  function closeSheet(value) {
+    sheet.classList.remove("visible");
+    if (sheetResolve) sheetResolve(value);
+    sheetResolve = null;
+  }
+
+  document.getElementById("sheetOk").addEventListener("click", () => closeSheet(sheetInput.value.trim()));
+  document.getElementById("sheetCancel").addEventListener("click", () => closeSheet(null));
+  sheetInput.addEventListener("keydown", (e) => { if (e.key === "Enter") closeSheet(sheetInput.value.trim()); });
+
+  /* ========================================================= ファイル木 */
+
+  const treeRoot = document.getElementById("tree");
+  const openDirs = new Set();
+
+  function fileIcon(name, isDir) {
+    if (isDir) return "📁";
+    const ext = name.split(".").pop().toLowerCase();
+    if (ext === "pdf") return "📕";
+    if (["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"].includes(ext)) return "🖼";
+    if (["py", "js", "ts", "tsx", "jsx", "kt", "java", "go", "rs", "c", "cpp", "rb", "php", "sh"].includes(ext)) return "📜";
+    if (["json", "yml", "yaml", "toml", "ini", "env"].includes(ext)) return "⚙";
+    if (["md", "txt", "rst"].includes(ext)) return "📄";
+    return "📄";
+  }
+
+  async function renderDir(relPath, container, depth) {
+    let listing;
+    try {
+      listing = await api.get("/api/fs/list", { path: relPath });
+    } catch (e) {
+      notify(e.message, true);
+      return;
+    }
+
+    container.textContent = "";
+    for (const entry of listing.entries) {
+      const isDir = entry.type === "dir";
+      const node = document.createElement("div");
+      node.className = "node" + (isDir ? " dir" : "");
+      node.style.paddingLeft = `${8 + depth * 14}px`;
+      node.dataset.path = entry.path;
+      node.dataset.type = entry.type;
+      node.innerHTML =
+        `<span class="twisty">${isDir ? (openDirs.has(entry.path) ? "▼" : "▶") : ""}</span>` +
+        `<span class="icon">${fileIcon(entry.name, isDir)}</span>` +
+        `<span class="name"></span>`;
+      node.querySelector(".name").textContent = entry.name;
+
+      const children = document.createElement("div");
+      children.className = "children";
+
+      node.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        if (isDir) {
+          const isOpen = children.classList.toggle("open");
+          node.querySelector(".twisty").textContent = isOpen ? "▼" : "▶";
+          if (isOpen) {
+            openDirs.add(entry.path);
+            if (!children.dataset.loaded) {
+              children.dataset.loaded = "1";
+              await renderDir(entry.path, children, depth + 1);
+            }
+          } else {
+            openDirs.delete(entry.path);
+          }
+          return;
+        }
+        openFile(entry.path);
+        if (window.innerWidth <= 720) sidebar.classList.add("hidden");
+      });
+
+      // 長押しで名前の変更・削除
+      let holdTimer = null;
+      node.addEventListener("touchstart", () => {
+        holdTimer = setTimeout(() => showFileActions(entry), 550);
+      }, { passive: true });
+      node.addEventListener("touchend", () => clearTimeout(holdTimer));
+      node.addEventListener("touchmove", () => clearTimeout(holdTimer));
+      node.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        showFileActions(entry);
+      });
+
+      container.appendChild(node);
+      container.appendChild(children);
+
+      if (isDir && openDirs.has(entry.path)) {
+        children.classList.add("open");
+        children.dataset.loaded = "1";
+        await renderDir(entry.path, children, depth + 1);
+      }
+    }
+  }
+
+  async function showFileActions(entry) {
+    const name = await prompt(`${entry.name} の新しい名前（空で削除）`, entry.name);
+    if (name === null) return;
+    try {
+      if (name === "") {
+        await api.post("/api/fs/delete", { path: entry.path, recursive: entry.type === "dir" });
+        closeTab(entry.path);
+        notify(`${entry.name} を削除しました`);
+      } else if (name !== entry.name) {
+        const parent = entry.path.includes("/") ? entry.path.slice(0, entry.path.lastIndexOf("/") + 1) : "";
+        await api.post("/api/fs/rename", { path: entry.path, to: parent + name });
+        notify(`${name} に変更しました`);
+      }
+      refreshTree();
+    } catch (e) {
+      notify(e.message, true);
+    }
+  }
+
+  function refreshTree() {
+    return renderDir("", treeRoot, 0);
+  }
+
+  /* ============================================================ エディタ */
+
+  const LANGUAGE_BY_EXT = {
+    py: "python", js: "javascript", mjs: "javascript", cjs: "javascript",
+    ts: "typescript", tsx: "typescript", jsx: "javascript",
+    json: "json", html: "html", htm: "html", css: "css", scss: "scss",
+    md: "markdown", yml: "yaml", yaml: "yaml", toml: "ini", ini: "ini",
+    sh: "shell", bash: "shell", zsh: "shell", sql: "sql", xml: "xml",
+    kt: "kotlin", java: "java", go: "go", rs: "rust", rb: "ruby",
+    php: "php", c: "c", h: "c", cpp: "cpp", hpp: "cpp", cs: "csharp",
+    dockerfile: "dockerfile", vbs: "vb", bat: "bat", ps1: "powershell",
+  };
+
+  const PREVIEW_EXT = {
+    pdf: "pdf",
+    png: "image", jpg: "image", jpeg: "image", gif: "image",
+    webp: "image", svg: "image", bmp: "image",
+  };
+
+  function extensionOf(path) {
+    const name = path.split("/").pop();
+    if (name.toLowerCase() === "dockerfile") return "dockerfile";
+    return name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+  }
+
+  let editor = null;
+  const tabs = new Map();      // path -> { model, dirty, viewState }
+  let activePath = null;
+
+  const tabsEl = document.getElementById("tabs");
+  const previewEl = document.getElementById("preview");
+  const emptyEl = document.getElementById("empty");
+  const editorEl = document.getElementById("editor");
+  const saveBtn = document.getElementById("saveBtn");
+  const pathLabel = document.getElementById("pathLabel");
+  const sidebar = document.getElementById("sidebar");
+
+  require.config({
+    paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs" },
+  });
+
+  require(["vs/editor/editor.main"], function () {
+    monaco.editor.defineTheme("pocket-dark", {
+      base: "vs-dark",
+      inherit: true,
+      rules: [],
+      colors: { "editor.background": "#0f1117", "editorGutter.background": "#0f1117" },
+    });
+
+    editor = monaco.editor.create(editorEl, {
+      theme: "pocket-dark",
+      automaticLayout: true,
+      fontSize: window.innerWidth < 900 ? 13 : 14,
+      minimap: { enabled: false },
+      wordWrap: "on",
+      tabSize: 2,
+      scrollBeyondLastLine: false,
+      renderWhitespace: "selection",
+      // タブレットのソフトキーボードと相性が悪いため既定では出さない
+      quickSuggestions: false,
+      padding: { top: 8, bottom: 80 },
+    });
+
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, saveActive);
+    editor.onDidChangeModelContent(() => {
+      const tab = tabs.get(activePath);
+      if (tab && !tab.dirty) {
+        tab.dirty = true;
+        renderTabs();
+        saveBtn.disabled = false;
+      }
+    });
+
+    refreshTree();
+  });
+
+  async function openFile(path) {
+    const kind = PREVIEW_EXT[extensionOf(path)];
+    if (kind) {
+      showPreview(path, kind);
+      return;
+    }
+
+    if (!tabs.has(path)) {
+      let file;
+      try {
+        file = await api.get("/api/fs/read", { path: path });
+      } catch (e) {
+        notify(e.message, true);
+        return;
+      }
+      const language = LANGUAGE_BY_EXT[extensionOf(path)] || "plaintext";
+      const model = monaco.editor.createModel(file.content, language);
+      tabs.set(path, { model: model, dirty: false, viewState: null });
+    }
+    activate(path);
+  }
+
+  function activate(path) {
+    if (activePath && tabs.has(activePath) && editor) {
+      tabs.get(activePath).viewState = editor.saveViewState();
+    }
+    activePath = path;
+    const tab = tabs.get(path);
+
+    previewEl.classList.remove("visible");
+    previewEl.textContent = "";
+    emptyEl.classList.add("hidden");
+    editorEl.style.display = "";
+
+    editor.setModel(tab.model);
+    if (tab.viewState) editor.restoreViewState(tab.viewState);
+    editor.focus();
+
+    saveBtn.disabled = !tab.dirty;
+    pathLabel.textContent = path;
+    renderTabs();
+    highlightTreeNode(path);
+  }
+
+  function renderTabs() {
+    tabsEl.textContent = "";
+    for (const path of tabs.keys()) {
+      const tab = tabs.get(path);
+      const el = document.createElement("div");
+      el.className = "tab" + (path === activePath ? " active" : "");
+
+      const label = document.createElement("span");
+      label.textContent = path.split("/").pop();
+      el.appendChild(label);
+
+      if (tab.dirty) {
+        const dot = document.createElement("span");
+        dot.className = "dirty";
+        dot.textContent = "●";
+        el.appendChild(dot);
+      }
+
+      const close = document.createElement("span");
+      close.className = "close";
+      close.textContent = "✕";
+      close.addEventListener("click", (event) => { event.stopPropagation(); closeTab(path); });
+      el.appendChild(close);
+
+      el.addEventListener("click", () => activate(path));
+      tabsEl.appendChild(el);
+    }
+  }
+
+  function highlightTreeNode(path) {
+    treeRoot.querySelectorAll(".node.active").forEach((n) => n.classList.remove("active"));
+    const node = treeRoot.querySelector(`.node[data-path="${cssEscape(path)}"]`);
+    if (node) node.classList.add("active");
+  }
+
+  function cssEscape(value) {
+    // [data-path="..."] の引用符内に入れるので、" と \ だけを退避する
+    return value.replace(/["\\]/g, "\\$&");
+  }
+
+  function closeTab(path) {
+    const tab = tabs.get(path);
+    if (!tab) return;
+    if (tab.dirty && !confirm(`${path} は未保存です。閉じますか？`)) return;
+
+    tab.model.dispose();
+    tabs.delete(path);
+
+    if (activePath === path) {
+      activePath = null;
+      const next = tabs.keys().next();
+      if (next.done) {
+        editor.setModel(null);
+        emptyEl.classList.remove("hidden");
+        pathLabel.textContent = "—";
+        saveBtn.disabled = true;
+        renderTabs();
+      } else {
+        activate(next.value);
+      }
+    } else {
+      renderTabs();
+    }
+  }
+
+  async function saveActive() {
+    if (!activePath) return;
+    const tab = tabs.get(activePath);
+    if (!tab || !tab.dirty) return;
+
+    try {
+      await api.post("/api/fs/write", { path: activePath, content: tab.model.getValue() });
+      tab.dirty = false;
+      saveBtn.disabled = true;
+      renderTabs();
+      notify(`${activePath} を保存しました`);
+    } catch (e) {
+      notify(e.message, true);
+    }
+  }
+
+  saveBtn.addEventListener("click", saveActive);
+
+  /* ============================================================ プレビュー */
+
+  async function showPreview(path, kind) {
+    activePath = null;
+    editorEl.style.display = "none";
+    emptyEl.classList.add("hidden");
+    previewEl.textContent = "";
+    previewEl.classList.add("visible");
+    pathLabel.textContent = path;
+    saveBtn.disabled = true;
+    renderTabs();
+    highlightTreeNode(path);
+
+    const url = `/api/fs/raw?path=${encodeURIComponent(path)}`;
+    if (kind === "image") {
+      const img = document.createElement("img");
+      img.src = url;
+      img.alt = path;
+      previewEl.appendChild(img);
+      return;
+    }
+
+    const notice = document.createElement("div");
+    notice.style.cssText = "color:#8b93a7;font-size:13px;padding:12px";
+    notice.textContent = "PDF を読み込んでいます...";
+    previewEl.appendChild(notice);
+
+    try {
+      await waitForPdfjs();
+      const pdf = await window.pdfjsLib.getDocument({ url: url, withCredentials: true }).promise;
+      notice.remove();
+
+      const scale = Math.min(2, Math.max(1, (previewEl.clientWidth - 24) / 595));
+      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+        const page = await pdf.getPage(pageNumber);
+        const viewport = page.getViewport({ scale: scale * (window.devicePixelRatio || 1) });
+        const canvas = document.createElement("canvas");
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        canvas.style.width = `${viewport.width / (window.devicePixelRatio || 1)}px`;
+        previewEl.appendChild(canvas);
+        await page.render({ canvasContext: canvas.getContext("2d"), viewport: viewport }).promise;
+      }
+    } catch (e) {
+      notice.textContent = `PDF を表示できません: ${e.message}`;
+    }
+  }
+
+  /* ============================================================ ターミナル */
+
+  const termPanel = document.getElementById("termPanel");
+  const termStatus = document.getElementById("termStatus");
+  let term = null;
+  let fitAddon = null;
+  let socket = null;
+
+  function ensureTerminal() {
+    if (term) return;
+    term = new Terminal({
+      fontSize: 12,
+      fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+      cursorBlink: true,
+      scrollback: 3000,
+      theme: { background: "#0f1117", foreground: "#e4e7ef", cursor: "#4ade80" },
+    });
+    fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(document.getElementById("terminal"));
+    term.onData((data) => sendToPty({ type: "input", data: data }));
+    connectPty();
+  }
+
+  function connectPty() {
+    const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+    socket = new WebSocket(`${scheme}//${location.host}/ws/pty?cols=${term.cols}&rows=${term.rows}`);
+    socket.binaryType = "arraybuffer";
+    termStatus.textContent = "接続中...";
+
+    socket.onopen = () => {
+      termStatus.textContent = "接続済み";
+      fitTerminal();
+    };
+    socket.onmessage = (event) => {
+      if (typeof event.data === "string") return;
+      term.write(new Uint8Array(event.data));
+    };
+    socket.onclose = () => { termStatus.textContent = "切断"; };
+  }
+
+  function sendToPty(payload) {
+    if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload));
+  }
+
+  function fitTerminal() {
+    if (!fitAddon || !termPanel.classList.contains("visible")) return;
+    try { fitAddon.fit(); } catch (e) { /* 非表示時は失敗することがある */ }
+    sendToPty({ type: "resize", cols: term.cols, rows: term.rows });
+  }
+
+  document.getElementById("toggleTerm").addEventListener("click", () => {
+    const visible = termPanel.classList.toggle("visible");
+    if (visible) {
+      ensureTerminal();
+      setTimeout(fitTerminal, 60);
+    }
+  });
+  document.getElementById("termClose").addEventListener("click", () => {
+    termPanel.classList.remove("visible");
+  });
+
+  const RUN_COMMAND = {
+    py: "python3", js: "node", mjs: "node", sh: "bash", rb: "ruby", php: "php", go: "go run",
+  };
+
+  document.getElementById("runFile").addEventListener("click", async () => {
+    if (!activePath) { notify("実行するファイルを開いてください", true); return; }
+    const runner = RUN_COMMAND[extensionOf(activePath)];
+    if (!runner) { notify("このファイル形式の実行コマンドが未設定です", true); return; }
+
+    if (tabs.get(activePath) && tabs.get(activePath).dirty) await saveActive();
+    termPanel.classList.add("visible");
+    ensureTerminal();
+    setTimeout(() => {
+      fitTerminal();
+      sendToPty({ type: "input", data: `${runner} ${shellQuote(activePath)}\n` });
+    }, 120);
+  });
+
+  async function waitForPdfjs(timeoutMs = 5000) {
+    const deadline = Date.now() + timeoutMs;
+    while (!window.pdfjsLib) {
+      if (Date.now() > deadline) throw new Error("PDF 表示モジュールを読み込めませんでした");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
+  function shellQuote(value) {
+    return `'${value.replace(/'/g, "'\\''")}'`;
+  }
+
+  /* ================================================================ 操作 */
+
+  document.getElementById("toggleSidebar").addEventListener("click", () => {
+    sidebar.classList.toggle("hidden");
+    setTimeout(fitTerminal, 60);
+  });
+  document.getElementById("openTerminal").addEventListener("click", () => {
+    location.href = "terminal.html";
+  });
+  document.getElementById("refreshTree").addEventListener("click", () => {
+    refreshTree();
+    notify("一覧を更新しました");
+  });
+
+  document.getElementById("newFile").addEventListener("click", async () => {
+    const name = await prompt("新しいファイルのパス（例: src/main.py）", "");
+    if (!name) return;
+    try {
+      await api.post("/api/fs/write", { path: name, content: "" });
+      await refreshTree();
+      openFile(name);
+    } catch (e) { notify(e.message, true); }
+  });
+
+  document.getElementById("newDir").addEventListener("click", async () => {
+    const name = await prompt("新しいフォルダのパス", "");
+    if (!name) return;
+    try {
+      await api.post("/api/fs/mkdir", { path: name });
+      refreshTree();
+    } catch (e) { notify(e.message, true); }
+  });
+
+  window.addEventListener("resize", () => setTimeout(fitTerminal, 80));
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", () => setTimeout(fitTerminal, 80));
+  }
+
+  // 未保存のまま離脱しそうなときに確認する
+  window.addEventListener("beforeunload", (event) => {
+    for (const tab of tabs.values()) {
+      if (tab.dirty) { event.preventDefault(); event.returnValue = ""; return; }
+    }
+  });
+
+  if (window.innerWidth <= 720) sidebar.classList.add("hidden");
+})();
+</script>
+</body>
+</html>
