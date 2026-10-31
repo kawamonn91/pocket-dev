@@ -8,6 +8,7 @@ from agent.pty_session import PtySession
 SHELL = "/bin/sh"
 
 
+@unittest.skipUnless(hasattr(os, "forkpty"), "POSIX forkpty required")
 class PtySessionTest(unittest.TestCase):
     def start(self, **kwargs):
         session = PtySession([SHELL], cwd=os.getcwd(), **kwargs)

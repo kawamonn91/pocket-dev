@@ -41,12 +41,22 @@ class ConfinementTest(FileServiceTestBase):
 
     def test_symlink_escape_is_rejected(self):
         link = os.path.join(self.root, "escape")
-        os.symlink(self.outside, link)
+        try:
+            os.symlink(self.outside, link)
+        except OSError as e:
+            if getattr(e, "winerror", None) == 1314:
+                self.skipTest("Windows symlink privilege required")
+            raise
         with self.assertRaises(PathOutsideRootError):
             self.service.read_text("escape")
 
     def test_symlinked_directory_escape_is_rejected(self):
-        os.symlink(self.tmpdir.name, os.path.join(self.root, "up"))
+        try:
+            os.symlink(self.tmpdir.name, os.path.join(self.root, "up"))
+        except OSError as e:
+            if getattr(e, "winerror", None) == 1314:
+                self.skipTest("Windows symlink privilege required")
+            raise
         with self.assertRaises(PathOutsideRootError):
             self.service.read_text("up/secret.txt")
 

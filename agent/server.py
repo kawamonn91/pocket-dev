@@ -102,7 +102,10 @@ class AgentHandler(BaseHTTPRequestHandler):
         if length > MAX_BODY_BYTES:
             raise ValueError("リクエストが大きすぎます")
         raw = self.rfile.read(length)
-        return json.loads(raw.decode("utf-8"))
+        data = json.loads(raw.decode("utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("JSON オブジェクトが必要です")
+        return data
 
     def _authorized(self, query: dict) -> bool:
         provided = auth.extract_token(self.headers, query)
@@ -176,7 +179,7 @@ class AgentHandler(BaseHTTPRequestHandler):
     def _serve_static(self, path: str):
         rel = path.lstrip("/") or "terminal.html"
         target = os.path.realpath(os.path.join(self.config.web_dir, rel))
-        if not target.startswith(self.config.web_dir):
+        if target != self.config.web_dir and not target.startswith(self.config.web_dir + os.sep):
             self._send_error_json(403, "許可されていないパスです")
             return
         if not os.path.isfile(target):

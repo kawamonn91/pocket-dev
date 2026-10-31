@@ -1,0 +1,36 @@
+# PR と master/main への push のたびに、単体テストと Docker イメージのビルドを行う。
+# master は「build」が通らないとマージできない設定にしてあり、PR は自動マージを予約しておくと
+# ここが通った時点でマージされる（docs/ci.md を参照）。
+name: CI
+
+on:
+  pull_request:
+    branches: [master, main]
+  push:
+    branches: [master, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # アクションは改ざんに備えてコミットの SHA で固定する（コメントは版）
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: 単体テストの実行
+        run: python -m unittest discover -s tests -t . -v
+
+      - name: Docker イメージのビルド
+        run: docker build -t pocket-dev:ci .
