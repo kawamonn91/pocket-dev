@@ -3,12 +3,17 @@
 os.forkpty() を使うため追加の依存（node-pty 等のネイティブモジュール）が不要。
 vim や top のような全画面アプリ、色、ジョブ制御がそのまま動く。
 """
-import fcntl
 import os
 import select
 import signal
 import struct
-import termios
+
+try:
+    import fcntl
+    import termios
+except ImportError:
+    fcntl = None
+    termios = None
 
 DEFAULT_COLS = 80
 DEFAULT_ROWS = 24
@@ -35,6 +40,8 @@ class PtySession:
             self.env.update(env)
 
     def start(self):
+        if not hasattr(os, "forkpty"):
+            raise RuntimeError("PTY is only supported on POSIX")
         pid, fd = os.forkpty()
         if pid == 0:
             # 子プロセス: 作業ディレクトリを移してシェルを起動する
@@ -66,7 +73,7 @@ class PtySession:
         """端末サイズを変更する（SIGWINCH も自動で飛ぶ）"""
         self.cols = max(1, int(cols))
         self.rows = max(1, int(rows))
-        if self.fd < 0:
+        if self.fd < 0 or fcntl is None or termios is None:
             return
         try:
             packed = struct.pack("HHHH", self.rows, self.cols, 0, 0)

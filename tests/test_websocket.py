@@ -85,6 +85,38 @@ class RecvTest(unittest.TestCase):
         conn = self.connection(b"\x81")
         self.assertIsNone(conn.recv())
 
+    def test_mid_frame_disconnect_returns_none(self):
+        # Header specifies 10 bytes, but stream cuts off after mask and 3 bytes of payload
+        truncated_payload = bytes([0x81, 0x8A]) + b"\x00\x00\x00\x00" + b"abc"
+        conn = self.connection(truncated_payload)
+        self.assertIsNone(conn.recv())
+        self.assertTrue(conn.closed)
+
+        # Header specifies 16-bit extended length (126), but stream cuts off mid-length
+        truncated_length = bytes([0x81, 0x80 | 126, 0x01])
+        conn = self.connection(truncated_length)
+        self.assertIsNone(conn.recv())
+        self.assertTrue(conn.closed)
+
+    def test_fragmented_continuation_exceeding_max_frame_bytes_closes_with_1009(self):
+        orig_max = ws.MAX_FRAME_BYTES
+        try:
+            ws.MAX_FRAME_BYTES = 10
+            first = bytearray(ws.encode_client_frame(ws.OP_TEXT, b"123456"))
+            first[0] &= 0x7F  # Clear FIN bit
+            cont = ws.encode_client_frame(ws.OP_CONTINUATION, b"789012")
+            conn = self.connection(bytes(first) + cont)
+
+            self.assertIsNone(conn.recv())
+            self.assertTrue(conn.closed)
+            # Verify close frame sent with code 1009
+            sent = conn._wfile.getvalue()
+            self.assertEqual(sent[0] & 0x0F, ws.OP_CLOSE)
+            code = struct.unpack(">H", sent[2:4])[0]
+            self.assertEqual(code, 1009)
+        finally:
+            ws.MAX_FRAME_BYTES = orig_max
+
 
 if __name__ == "__main__":
     unittest.main()

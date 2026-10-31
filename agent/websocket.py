@@ -100,30 +100,31 @@ class WebSocketConnection:
         while True:
             try:
                 b1, b2 = self._read_exactly(2)
+
+                fin = bool(b1 & 0x80)
+                opcode = b1 & 0x0F
+                masked = bool(b2 & 0x80)
+                length = b2 & 0x7F
+
+                if length == 126:
+                    length = struct.unpack(">H", self._read_exactly(2))[0]
+                elif length == 127:
+                    length = struct.unpack(">Q", self._read_exactly(8))[0]
+
+                if length > MAX_FRAME_BYTES:
+                    self.close(1009, "frame too large")
+                    return None
+                if not masked:
+                    # クライアントからのフレームは必ずマスクされている必要がある
+                    self.close(1002, "unmasked frame")
+                    return None
+
+                mask = self._read_exactly(4)
+                payload = bytearray(self._read_exactly(length)) if length else bytearray()
             except WebSocketError:
                 self.closed = True
                 return None
 
-            fin = bool(b1 & 0x80)
-            opcode = b1 & 0x0F
-            masked = bool(b2 & 0x80)
-            length = b2 & 0x7F
-
-            if length == 126:
-                length = struct.unpack(">H", self._read_exactly(2))[0]
-            elif length == 127:
-                length = struct.unpack(">Q", self._read_exactly(8))[0]
-
-            if length > MAX_FRAME_BYTES:
-                self.close(1009, "frame too large")
-                return None
-            if not masked:
-                # クライアントからのフレームは必ずマスクされている必要がある
-                self.close(1002, "unmasked frame")
-                return None
-
-            mask = self._read_exactly(4)
-            payload = bytearray(self._read_exactly(length)) if length else bytearray()
             for i in range(length):
                 payload[i] ^= mask[i & 3]
 
@@ -138,6 +139,9 @@ class WebSocketConnection:
 
             if opcode != OP_CONTINUATION:
                 message_opcode = opcode
+            if len(message) + len(payload) > MAX_FRAME_BYTES:
+                self.close(1009, "message too large")
+                return None
             message += payload
 
             if fin:

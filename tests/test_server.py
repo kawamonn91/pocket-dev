@@ -99,9 +99,10 @@ class ServerTestBase(unittest.TestCase):
             f.write("見えてはいけない")
 
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        cls.web_dir = os.path.join(project_root, "web")
         config = AgentConfig(
             root=cls.root,
-            web_dir=os.path.join(project_root, "web"),
+            web_dir=cls.web_dir,
             bind="127.0.0.1",
             port=0,  # 空きポートを自動割り当て
             token=TOKEN,
@@ -242,6 +243,37 @@ class FileApiTest(ServerTestBase):
     def test_info_reports_root(self):
         self.assertEqual(self.get_json("/api/info")["root"], os.path.realpath(self.root))
 
+    def test_non_dict_json_post_is_400(self):
+        request = urllib.request.Request(
+            self.url("/api/fs/write"),
+            data=json.dumps(["not", "a", "dict"]).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(request, timeout=5)
+        self.assertEqual(caught.exception.code, 400)
+
+    def test_sibling_directory_static_traversal_is_rejected(self):
+        sibling_dir = self.web_dir + "_sibling"
+        os.makedirs(sibling_dir, exist_ok=True)
+        sibling_file = os.path.join(sibling_dir, "secret.txt")
+        with open(sibling_file, "w", encoding="utf-8") as f:
+            f.write("sibling-secret")
+
+        def _cleanup():
+            if os.path.exists(sibling_file):
+                os.remove(sibling_file)
+            if os.path.exists(sibling_dir):
+                os.rmdir(sibling_dir)
+
+        self.addCleanup(_cleanup)
+
+        sibling_name = os.path.basename(sibling_dir)
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(self.url(f"/../{sibling_name}/secret.txt"), timeout=5)
+        self.assertEqual(caught.exception.code, 403)
+
 
 class PtyWebSocketTest(ServerTestBase):
     def connect(self, query: str = "") -> WsClient:
@@ -249,27 +281,32 @@ class PtyWebSocketTest(ServerTestBase):
         self.addCleanup(client.close)
         return client
 
+    @unittest.skipUnless(hasattr(os, "forkpty"), "POSIX forkpty required")
     def test_handshake_is_accepted(self):
         client = self.connect()
         self.assertIn("101", client.status_line)
         self.assertEqual(client.headers.get("sec-websocket-accept"), client.expected_accept)
 
+    @unittest.skipUnless(hasattr(os, "forkpty"), "POSIX forkpty required")
     def test_command_runs_in_the_container_shell(self):
         client = self.connect()
         client.send_json({"type": "input", "data": "echo POCKET_OK\n"})
         self.assertIn("POCKET_OK", client.read_output_until("POCKET_OK"))
 
+    @unittest.skipUnless(hasattr(os, "forkpty"), "POSIX forkpty required")
     def test_shell_starts_in_workspace_root(self):
         client = self.connect()
         client.send_json({"type": "input", "data": "pwd\n"})
         self.assertIn(os.path.basename(self.root), client.read_output_until("workspace"))
 
+    @unittest.skipUnless(hasattr(os, "forkpty"), "POSIX forkpty required")
     def test_resize_message_is_applied(self):
         client = self.connect("&cols=80&rows=24")
         client.send_json({"type": "resize", "cols": 132, "rows": 43})
         client.send_json({"type": "input", "data": "stty size\n"})
         self.assertIn("43 132", client.read_output_until("43 132"))
 
+    @unittest.skipUnless(hasattr(os, "forkpty"), "POSIX forkpty required")
     def test_cwd_outside_root_falls_back_to_root(self):
         client = self.connect("&cwd=../")
         client.send_json({"type": "input", "data": "pwd\n"})
@@ -280,6 +317,7 @@ class PtyWebSocketTest(ServerTestBase):
         self.addCleanup(client.close)
         self.assertIn("401", client.status_line)
 
+    @unittest.skipUnless(hasattr(os, "forkpty"), "POSIX forkpty required")
     def test_malformed_message_does_not_kill_the_session(self):
         client = self.connect()
         client.send_json({"type": "unknown-kind"})
