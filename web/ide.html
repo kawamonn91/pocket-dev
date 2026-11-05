@@ -24,6 +24,7 @@
     --term-h: 240px;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  [hidden] { display: none !important; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif; font-size: 14px; }
   button { font-family: inherit; }
@@ -707,6 +708,25 @@ window.pdfjsLib = pdfjs;
     return `'${value.replace(/'/g, "'\\''")}'`;
   }
 
+  /* ========================================================= 接続先の機能 */
+
+  // 編集しかできない接続先（pocket-dev アプリの Google ドライブ直結など）は /api/info の
+  // terminal に false を返すので、ターミナルと「実行」のボタンを隠す。
+  // terminal を返さない古いサーバーや、問い合わせに失敗したときは、今までどおり出しておく
+  async function applyServerInfo() {
+    let info;
+    try {
+      info = await api.get("/api/info");
+    } catch (e) {
+      return;
+    }
+    if (info.terminal === false) {
+      document.getElementById("openTerminal").hidden = true;
+      document.getElementById("toggleTerm").hidden = true;
+      termPanel.classList.remove("visible");
+    }
+  }
+
   /* ================================================================ 操作 */
 
   document.getElementById("toggleSidebar").addEventListener("click", () => {
@@ -753,6 +773,7 @@ window.pdfjsLib = pdfjs;
   });
 
   if (window.innerWidth <= 720) sidebar.classList.add("hidden");
+  applyServerInfo();
 })();
 </script>
 </body>

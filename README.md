@@ -107,9 +107,13 @@ python3 -m unittest discover -s tests -t .
 - [x] IDE 本体（Monaco・ファイルツリー・タブ・保存・言語判定・長押しで改名/削除）
 - [x] IDE 内ターミナル（「▶ このファイルを実行」で保存して即実行）
 - [x] PDF プレビュー（pdf.js）・画像プレビュー
+- [x] 編集だけの接続先への対応（`/api/info` の `terminal` が `false` なら、IDE はターミナルと「実行」のボタンを隠す）
 - [ ] 全文検索・Git 操作
-- [ ] Google Drive 連携
-      ※ `/dev/fuse` が使えないため `rclone mount` ではなく Drive API 方式で実装する
+
+Google ドライブとの連携はこのサーバーでは行わない。
+ドライブのファイルを直接編集するのは pocket-dev アプリ（T-tech Store）の接続先「Drive」で、編集だけができる。
+実行するときは Pocket Linux を使う（Pocket Linux がドライブと同期したフォルダを、同じ端末の IDE で編集して実行する）。
+`/dev/fuse` が使えないため、ドライブをマウントして実行することはできない。
 - [ ] オフライン用に CDN 資材をローカルへ取り込み（Service Worker）
 
 ## 注意
