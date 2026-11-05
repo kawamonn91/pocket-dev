@@ -243,6 +243,10 @@ class FileApiTest(ServerTestBase):
     def test_info_reports_root(self):
         self.assertEqual(self.get_json("/api/info")["root"], os.path.realpath(self.root))
 
+    def test_info_reports_terminal_available(self):
+        # IDE はこの値が false のときだけ、ターミナルと「実行」のボタンを隠す
+        self.assertIs(self.get_json("/api/info")["terminal"], True)
+
     def test_non_dict_json_post_is_400(self):
         request = urllib.request.Request(
             self.url("/api/fs/write"),

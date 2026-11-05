@@ -168,6 +168,9 @@ class AgentHandler(BaseHTTPRequestHandler):
                     "root": self.config.root,
                     "shell": self.config.shell,
                     "hostname": socket.gethostname(),
+                    # IDE はこれを見て、ターミナルと「実行」のボタンを出すか決める。
+                    # Google ドライブ直結（pocket-dev アプリ）のように編集しかできない接続先は false を返す
+                    "terminal": True,
                 })
             else:
                 self._send_error_json(404, "不明なエンドポイントです")
