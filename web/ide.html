@@ -55,6 +55,10 @@
   #sidebarHead button { flex: 1 1 auto; background: var(--panel-2); color: var(--text);
     border: 1px solid var(--border); border-radius: 6px; padding: 7px 0; font-size: 12px; }
   #tree { flex: 1 1 auto; overflow: auto; padding: 4px 0 24px; -webkit-overflow-scrolling: touch; }
+  #sidebarFoot { flex: 0 0 auto; padding: 9px 10px calc(9px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+  #sidebarFoot label { display: flex; align-items: center; gap: 8px; }
+  #sidebarFoot input { width: 16px; height: 16px; accent-color: var(--accent-dim); margin: 0; }
   .node { display: flex; align-items: center; gap: 6px; padding: 7px 8px;
     cursor: pointer; font-size: 13px; user-select: none; }
   .node:active { background: #232838; }
@@ -134,6 +138,7 @@
     <span class="spacer"></span>
     <button class="tb-btn" id="openTerminal" aria-label="ターミナルへ">⌨</button>
     <button class="tb-btn" id="toggleTerm">▣ 実行</button>
+    <button class="tb-btn" id="formatBtn" disabled title="言語の作法に合わせて整える（Shift+Alt+F）">整形</button>
     <button class="tb-btn primary" id="saveBtn" disabled>保存</button>
   </div>
 
@@ -145,6 +150,9 @@
         <button id="newDir">＋ 階層</button>
       </div>
       <div id="tree"></div>
+      <div id="sidebarFoot">
+        <label><input type="checkbox" id="formatOnSave"> 保存するときに整形する</label>
+      </div>
     </aside>
 
     <div id="main">
@@ -370,7 +378,7 @@ window.pdfjsLib = pdfjs;
   const LANGUAGE_BY_EXT = {
     py: "python", js: "javascript", mjs: "javascript", cjs: "javascript",
     ts: "typescript", tsx: "typescript", jsx: "javascript",
-    json: "json", html: "html", htm: "html", css: "css", scss: "scss",
+    json: "json", html: "html", htm: "html", css: "css", scss: "scss", less: "less", pyi: "python",
     md: "markdown", yml: "yaml", yaml: "yaml", toml: "ini", ini: "ini",
     sh: "shell", bash: "shell", zsh: "shell", sql: "sql", xml: "xml",
     kt: "kotlin", java: "java", go: "go", rs: "rust", rb: "ruby",
@@ -399,6 +407,7 @@ window.pdfjsLib = pdfjs;
   const emptyEl = document.getElementById("empty");
   const editorEl = document.getElementById("editor");
   const saveBtn = document.getElementById("saveBtn");
+  const formatBtn = document.getElementById("formatBtn");
   const pathLabel = document.getElementById("pathLabel");
   const sidebar = document.getElementById("sidebar");
 
@@ -420,7 +429,8 @@ window.pdfjsLib = pdfjs;
       fontSize: window.innerWidth < 900 ? 13 : 14,
       minimap: { enabled: false },
       wordWrap: "on",
-      tabSize: 2,
+      // 改行したときに、言語の決まり（Python の「:」のあとなど）でインデントを足す
+      autoIndent: "full",
       scrollBeyondLastLine: false,
       renderWhitespace: "selection",
       // タブレットのソフトキーボードと相性が悪いため既定では出さない
@@ -428,7 +438,8 @@ window.pdfjsLib = pdfjs;
       padding: { top: 8, bottom: 80 },
     });
 
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, saveActive);
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveActive());
+    editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF, () => formatActive());
     editor.onDidChangeModelContent(() => {
       const tab = tabs.get(activePath);
       if (tab && !tab.dirty) {
@@ -458,6 +469,9 @@ window.pdfjsLib = pdfjs;
       }
       const language = LANGUAGE_BY_EXT[extensionOf(path)] || "plaintext";
       const model = monaco.editor.createModel(file.content, language);
+      // 改行がまだ無いファイルは LF にする（Windows のブラウザで開いても、サーバー側の Linux に合わせる）
+      if (!file.content.includes("\n")) model.setEOL(monaco.editor.EndOfLineSequence.LF);
+      applyIndentation(model, language);
       tabs.set(path, { model: model, dirty: false, viewState: null });
     }
     activate(path);
@@ -480,7 +494,8 @@ window.pdfjsLib = pdfjs;
     editor.focus();
 
     saveBtn.disabled = !tab.dirty;
-    pathLabel.textContent = path;
+    formatBtn.disabled = false;
+    pathLabel.textContent = `${path} · ${indentLabel(tab.model)}`;
     renderTabs();
     highlightTreeNode(path);
   }
@@ -541,6 +556,7 @@ window.pdfjsLib = pdfjs;
         emptyEl.classList.remove("hidden");
         pathLabel.textContent = "—";
         saveBtn.disabled = true;
+        formatBtn.disabled = true;
         renderTabs();
       } else {
         activate(next.value);
@@ -551,22 +567,228 @@ window.pdfjsLib = pdfjs;
   }
 
   async function saveActive() {
-    if (!activePath) return;
-    const tab = tabs.get(activePath);
+    const path = activePath;
+    if (!path) return;
+    const tab = tabs.get(path);
     if (!tab || !tab.dirty) return;
 
+    // 整形に失敗しても（書きかけで構文が崩れているときなど）、保存はする
+    let formatted = null;
+    if (formatOnSave && formatsOnSave(tab.model)) formatted = await formatModel(path, tab.model, { quiet: true });
+    if (tab.model.isDisposed()) return; // 待っている間にタブを閉じた
+
     try {
-      await api.post("/api/fs/write", { path: activePath, content: tab.model.getValue() });
-      tab.dirty = false;
-      saveBtn.disabled = true;
+      const version = tab.model.getAlternativeVersionId();
+      await api.post("/api/fs/write", { path: path, content: tab.model.getValue() });
+      // 通信の間に書き足した分は、まだ保存されていない
+      tab.dirty = tab.model.getAlternativeVersionId() !== version;
+      if (activePath === path) saveBtn.disabled = !tab.dirty;
       renderTabs();
-      notify(`${activePath} を保存しました`);
+      if (formatted && formatted.error) notify(`保存しました（${formatted.error}）`, true);
+      else notify(formatted && formatted.changed ? `${formatted.tool} で整えて保存しました` : `${path} を保存しました`);
     } catch (e) {
       notify(e.message, true);
     }
   }
 
-  saveBtn.addEventListener("click", saveActive);
+  saveBtn.addEventListener("click", () => saveActive());
+
+  /* ======================================================== 整形とインデント */
+
+  // 言語ごとの作法に合わせたインデント。すでに書かれているファイルは、そのファイルの書き方に合わせる
+  const INDENT_BY_LANGUAGE = {
+    python: [4, true], go: [4, false], java: [4, true], kotlin: [4, true], c: [4, true], cpp: [4, true],
+    csharp: [4, true], rust: [4, true], php: [4, true], sql: [4, true], vb: [4, true], powershell: [4, true],
+    javascript: [2, true], typescript: [2, true], json: [2, true], html: [2, true], css: [2, true],
+    scss: [2, true], yaml: [2, true], markdown: [2, true], ruby: [2, true], shell: [2, true], xml: [2, true],
+  };
+
+  function applyIndentation(model, language) {
+    const [size, spaces] = INDENT_BY_LANGUAGE[language] || [4, true];
+    const useDefault = () => model.updateOptions({ tabSize: size, indentSize: size, insertSpaces: spaces });
+    useDefault();
+    if (model.getValueLength() === 0) return;
+    model.detectIndentation(spaces, size);
+    // 書き方が乱れたファイルでは、スペース 6 のようなありえない幅と判定されることがある
+    const detected = model.getOptions();
+    if (detected.insertSpaces && ![2, 3, 4, 8].includes(detected.indentSize)) useDefault();
+  }
+
+  function indentLabel(model) {
+    const options = model.getOptions();
+    return options.insertSpaces ? `スペース ${options.indentSize || options.tabSize}` : "タブ";
+  }
+
+  // 整形の道具は、その言語を初めて整形するときに CDN から読み込む（読み込みに失敗したら次にやり直す）
+  const CDN = "https://cdn.jsdelivr.net/npm/";
+  const PRETTIER = CDN + "prettier@3.9.10/";
+  const loaded = {};
+  let loadFailures = 0;
+
+  function loadOnce(name, loader) {
+    if (!loaded[name]) {
+      loaded[name] = loader().catch((e) => {
+        delete loaded[name];
+        loadFailures++;
+        throw e;
+      });
+    }
+    return loaded[name];
+  }
+
+  // ブラウザは失敗した import の結果を覚えていて、同じ URL ではやり直せない。失敗のあとは URL を変えて読む
+  function importFromCdn(url) {
+    return import(loadFailures ? `${url}?retry=${loadFailures}` : url);
+  }
+
+  function loadWasmFormatter(name, url) {
+    return loadOnce(name, async () => {
+      const module = await importFromCdn(CDN + url);
+      await module.default();
+      return module;
+    });
+  }
+
+  async function prettier(code, path, parser, pluginNames) {
+    const [core, ...plugins] = await Promise.all([
+      loadOnce("prettier", () => importFromCdn(PRETTIER + "standalone.mjs")),
+      ...pluginNames.map((name) => loadOnce("prettier-" + name, () => importFromCdn(PRETTIER + `plugins/${name}.mjs`))),
+    ]);
+    // Prettier の既定（2 スペース・80 桁・ダブルクォート・セミコロンあり）が、多くの JS/TS の作法になっている
+    return core.format(code, { parser: parser, plugins: plugins, filepath: path });
+  }
+
+  function clangFormat(fileName, style) {
+    return async (code) => {
+      const module = await loadWasmFormatter("clang-format", "@wasm-fmt/clang-format@23.1.1/clang-format-web.js");
+      return module.format(code, fileName, style);
+    };
+  }
+
+  // #include や import の順番は変えない（順番で動きが変わるコードがあるので、空白とインデントだけを整える）
+  const C_STYLE = "{BasedOnStyle: Google, IndentWidth: 4, ColumnLimit: 100, SortIncludes: Never}";
+  const JAVA_STYLE = "{BasedOnStyle: Google, IndentWidth: 4, ContinuationIndentWidth: 8, ColumnLimit: 100, SortIncludes: Never}";
+
+  // Monaco の言語ごとの整形の道具
+  const FORMATTERS = {
+    // PEP 8 に沿った Black と同じ書き方（4 スペース・88 桁）
+    python: { tool: "Ruff", run: async (code, path) => {
+      const module = await loadWasmFormatter("ruff", "@wasm-fmt/ruff_fmt@0.15.20/ruff_fmt_web.js");
+      return module.format(code, path.split("/").pop(), { indent_width: 4, line_width: 88 });
+    } },
+    // Go の標準（タブでインデント）
+    go: { tool: "gofmt", run: async (code) => {
+      const module = await loadWasmFormatter("gofmt", "@wasm-fmt/gofmt@0.7.3/gofmt_web.js");
+      return module.format(code);
+    } },
+    c: { tool: "clang-format", run: clangFormat("main.c", C_STYLE) },
+    cpp: { tool: "clang-format", run: clangFormat("main.cpp", C_STYLE) },
+    java: { tool: "clang-format", run: clangFormat("main.java", JAVA_STYLE) },
+    csharp: { tool: "clang-format", run: clangFormat("main.cs", "Microsoft") },
+    javascript: { tool: "Prettier", run: (code, path) => prettier(code, path, "babel", ["babel", "estree"]) },
+    typescript: { tool: "Prettier", run: (code, path) => prettier(code, path, "typescript", ["typescript", "estree"]) },
+    json: { tool: "Prettier", run: (code, path) => prettier(code, path, "json", ["babel", "estree"]) },
+    css: { tool: "Prettier", run: (code, path) => prettier(code, path, "css", ["postcss"]) },
+    scss: { tool: "Prettier", run: (code, path) => prettier(code, path, "scss", ["postcss"]) },
+    less: { tool: "Prettier", run: (code, path) => prettier(code, path, "less", ["postcss"]) },
+    html: { tool: "Prettier", run: (code, path) => prettier(code, path, "html", ["html", "babel", "estree", "postcss"]) },
+    markdown: { tool: "Prettier", run: (code, path) => prettier(code, path, "markdown", ["markdown"]) },
+    yaml: { tool: "Prettier", run: (code, path) => prettier(code, path, "yaml", ["yaml"]) },
+  };
+
+  // 整形の道具が無い言語（Kotlin・Rust・シェルなど）は、行末の空白を消し、最後に改行を1つだけ置く
+  function tidyWhitespace(code, language) {
+    // 言語の分からないファイルの行末のタブは中身かもしれない（TSV の空の列など）ので残す
+    const trailing = language === "plaintext" ? / +$/gm : /[ \t]+$/gm;
+    const text = code.replace(trailing, "").replace(/\n+$/, "");
+    return text === "" ? "" : text + "\n";
+  }
+
+  // 改行は LF にそろえて扱う（Monaco は入れた文字をファイルの改行（CRLF など）に合わせて入れる）
+  function toLf(text) {
+    return text.replace(/\r\n?/g, "\n");
+  }
+
+  // 保存のたびに整えないもの: 言語の分からないファイル（差分ファイルなどは空白も中身）と、
+  // とても大きなファイル（整形の間は画面が止まる）。どちらも「整形」のボタンでは整えられる
+  const FORMAT_ON_SAVE_MAX_CHARS = 1000000;
+
+  function formatsOnSave(model) {
+    return model.getLanguageId() !== "plaintext" && model.getValueLength() <= FORMAT_ON_SAVE_MAX_CHARS;
+  }
+
+  // 道具の読み込みを待つ長さ。保存は待たせない。読み込みは裏で続くので、終わっていれば次の整形で使える
+  const LOAD_WAIT_ON_SAVE_MS = 5000;
+  const LOAD_WAIT_ON_BUTTON_MS = 60000;
+
+  function withTimeout(promise, ms) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("読み込みに時間がかかっています")), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  }
+
+  /**
+   * [model] を言語の作法に合わせて整える。変わったら元に戻せる編集として入れる。
+   * 戻り値は { tool, changed }。整形できなければ error に理由を入れる（quiet でなければ画面にも出す）。
+   * 待っている間に書き換えられたら何もせず null を返す
+   */
+  async function formatModel(path, model, { quiet = false } = {}) {
+    const language = model.getLanguageId();
+    const formatter = FORMATTERS[language];
+    const before = model.getValue();
+    const input = toLf(before);
+    let after;
+    try {
+      if (formatter && !formatter.ready && !quiet) notify(`${formatter.tool} を読み込んでいます...`);
+      after = formatter
+        ? await withTimeout(formatter.run(input, path), quiet ? LOAD_WAIT_ON_SAVE_MS : LOAD_WAIT_ON_BUTTON_MS)
+        : tidyWhitespace(input, language);
+      if (formatter) formatter.ready = true;
+    } catch (e) {
+      const reason = String((e && e.message) || e).split("\n")[0].slice(0, 160);
+      const message = `${formatter.tool} で整形できませんでした: ${reason}`;
+      if (!quiet) notify(message, true);
+      return { tool: formatter.tool, changed: false, error: message };
+    }
+    const tool = formatter ? formatter.tool : "空白の整理";
+    // 待っている間に書き換えられたら、上書きしない
+    if (model.isDisposed() || model.getValue() !== before) return null;
+    if (toLf(after) === input) return { tool: tool, changed: false };
+
+    const isActive = editor && editor.getModel() === model;
+    const viewState = isActive ? editor.saveViewState() : null;
+    model.pushStackElement();
+    model.pushEditOperations([], [{ range: model.getFullModelRange(), text: after }], () => null);
+    model.pushStackElement();
+    if (viewState) editor.restoreViewState(viewState);
+    // 整形でインデントの書き方が変わったとき（タブ → スペースなど）に、表示と入力を合わせる
+    applyIndentation(model, language);
+    if (isActive) pathLabel.textContent = `${path} · ${indentLabel(model)}`;
+    return { tool: tool, changed: true };
+  }
+
+  async function formatActive() {
+    const path = activePath;
+    const tab = path && tabs.get(path);
+    if (!tab) return;
+    const result = await formatModel(path, tab.model);
+    if (result && !result.error) notify(result.changed ? `${result.tool} で整えました` : "整える所はありませんでした");
+  }
+
+  formatBtn.addEventListener("click", formatActive);
+
+  // 保存するときに整形するか（端末ごとに覚える。既定はする）
+  const FORMAT_ON_SAVE_KEY = "pocketdev.formatOnSave";
+  let formatOnSave = true;
+  try { formatOnSave = localStorage.getItem(FORMAT_ON_SAVE_KEY) !== "0"; } catch (e) { /* 保存できない環境 */ }
+  const formatOnSaveBox = document.getElementById("formatOnSave");
+  formatOnSaveBox.checked = formatOnSave;
+  formatOnSaveBox.addEventListener("change", () => {
+    formatOnSave = formatOnSaveBox.checked;
+    try { localStorage.setItem(FORMAT_ON_SAVE_KEY, formatOnSave ? "1" : "0"); } catch (e) { /* 保存できない環境 */ }
+  });
 
   /* ============================================================ プレビュー */
 
@@ -578,6 +800,7 @@ window.pdfjsLib = pdfjs;
     previewEl.classList.add("visible");
     pathLabel.textContent = path;
     saveBtn.disabled = true;
+    formatBtn.disabled = true;
     renderTabs();
     highlightTreeNode(path);
 
