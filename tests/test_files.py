@@ -117,6 +117,15 @@ class ListAndReadTest(FileServiceTestBase):
         self.assertTrue(data.startswith(b"%PDF"))
         self.assertEqual(mime, "application/pdf")
 
+    def test_read_bytes_rejects_oversized_file(self):
+        import unittest.mock
+        path = os.path.join(self.root, "big.pdf")
+        with open(path, "wb") as f:
+            f.write(b"%PDF-1.7\n")
+        with unittest.mock.patch("agent.files.MAX_RAW_BYTES", 4):
+            with self.assertRaises(FileServiceError):
+                self.service.read_bytes("big.pdf")
+
 
 class WriteTest(FileServiceTestBase):
     def test_write_creates_parent_directories(self):
