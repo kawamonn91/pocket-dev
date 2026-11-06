@@ -108,6 +108,10 @@ python3 -m unittest discover -s tests -t .
 - [x] IDE 内ターミナル（「▶ このファイルを実行」で保存して即実行）
 - [x] PDF プレビュー（pdf.js）・画像プレビュー
 - [x] 編集だけの接続先への対応（`/api/info` の `terminal` が `false` なら、IDE はターミナルと「実行」のボタンを隠す）
+- [x] コードの整形（「整形」ボタン、Shift+Alt+F、保存時。保存時の整形はサイドバーで切れる）
+  - Python は Ruff、Go は gofmt、C / C++ / Java / C# は clang-format、JS / TS / JSON / CSS / HTML / Markdown / YAML は Prettier。ブラウザの中で動き、その言語を初めて整形するときに CDN から読み込む
+  - 道具の無い言語（Kotlin・Rust・シェルなど）は行末の空白と最後の空行だけを整える
+  - インデントは言語の作法（Python は 4 スペース、Go はタブなど）で入力でき、すでに書かれているファイルはその書き方に合わせる
 - [ ] 全文検索・Git 操作
 
 Google ドライブとの連携はこのサーバーでは行わない。
