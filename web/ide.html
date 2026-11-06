@@ -29,7 +29,7 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif; font-size: 14px; }
   button { font-family: inherit; }
 
-  #app { display: flex; flex-direction: column; height: 100dvh;
+  #app { position: fixed; inset: 0; display: flex; flex-direction: column;
     padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
 
   /* ------------------------------------------------------------- ヘッダ */
@@ -595,16 +595,20 @@ window.pdfjsLib = pdfjs;
 
   /* ======================================================== 整形とインデント */
 
-  // 言語ごとの作法に合わせたインデント。すでに書かれているファイルは、そのファイルの書き方に合わせる
-  const INDENT_BY_LANGUAGE = {
-    python: [4, true], go: [4, false], java: [4, true], kotlin: [4, true], c: [4, true], cpp: [4, true],
-    csharp: [4, true], rust: [4, true], php: [4, true], sql: [4, true], vb: [4, true], powershell: [4, true],
-    javascript: [2, true], typescript: [2, true], json: [2, true], html: [2, true], css: [2, true],
-    scss: [2, true], yaml: [2, true], markdown: [2, true], ruby: [2, true], shell: [2, true], xml: [2, true],
-  };
+  // 言語ごとの作法に合わせたインデント（既定は 4 スペース。Go はタブ、JS/TS/マークアップ系は 2 スペース）。
+  // すでに書かれているファイルは、そのファイルの書き方に合わせる
+  const TWO_SPACE_LANGUAGES = new Set([
+    "javascript", "typescript", "json", "html", "css", "scss", "yaml", "markdown", "ruby", "shell", "xml",
+  ]);
+
+  function defaultIndent(language) {
+    if (language === "go") return [4, false];
+    if (TWO_SPACE_LANGUAGES.has(language)) return [2, true];
+    return [4, true];
+  }
 
   function applyIndentation(model, language) {
-    const [size, spaces] = INDENT_BY_LANGUAGE[language] || [4, true];
+    const [size, spaces] = defaultIndent(language);
     const useDefault = () => model.updateOptions({ tabSize: size, indentSize: size, insertSpaces: spaces });
     useDefault();
     if (model.getValueLength() === 0) return;
@@ -665,6 +669,10 @@ window.pdfjsLib = pdfjs;
     };
   }
 
+  function prettierFormatter(parser, pluginNames = [parser]) {
+    return { tool: "Prettier", run: (code, path) => prettier(code, path, parser, pluginNames) };
+  }
+
   // #include や import の順番は変えない（順番で動きが変わるコードがあるので、空白とインデントだけを整える）
   const C_STYLE = "{BasedOnStyle: Google, IndentWidth: 4, ColumnLimit: 100, SortIncludes: Never}";
   const JAVA_STYLE = "{BasedOnStyle: Google, IndentWidth: 4, ContinuationIndentWidth: 8, ColumnLimit: 100, SortIncludes: Never}";
@@ -685,15 +693,15 @@ window.pdfjsLib = pdfjs;
     cpp: { tool: "clang-format", run: clangFormat("main.cpp", C_STYLE) },
     java: { tool: "clang-format", run: clangFormat("main.java", JAVA_STYLE) },
     csharp: { tool: "clang-format", run: clangFormat("main.cs", "Microsoft") },
-    javascript: { tool: "Prettier", run: (code, path) => prettier(code, path, "babel", ["babel", "estree"]) },
-    typescript: { tool: "Prettier", run: (code, path) => prettier(code, path, "typescript", ["typescript", "estree"]) },
-    json: { tool: "Prettier", run: (code, path) => prettier(code, path, "json", ["babel", "estree"]) },
-    css: { tool: "Prettier", run: (code, path) => prettier(code, path, "css", ["postcss"]) },
-    scss: { tool: "Prettier", run: (code, path) => prettier(code, path, "scss", ["postcss"]) },
-    less: { tool: "Prettier", run: (code, path) => prettier(code, path, "less", ["postcss"]) },
-    html: { tool: "Prettier", run: (code, path) => prettier(code, path, "html", ["html", "babel", "estree", "postcss"]) },
-    markdown: { tool: "Prettier", run: (code, path) => prettier(code, path, "markdown", ["markdown"]) },
-    yaml: { tool: "Prettier", run: (code, path) => prettier(code, path, "yaml", ["yaml"]) },
+    javascript: prettierFormatter("babel", ["babel", "estree"]),
+    typescript: prettierFormatter("typescript", ["typescript", "estree"]),
+    json: prettierFormatter("json", ["babel", "estree"]),
+    css: prettierFormatter("css", ["postcss"]),
+    scss: prettierFormatter("scss", ["postcss"]),
+    less: prettierFormatter("less", ["postcss"]),
+    html: prettierFormatter("html", ["html", "babel", "estree", "postcss"]),
+    markdown: prettierFormatter("markdown"),
+    yaml: prettierFormatter("yaml"),
   };
 
   // 整形の道具が無い言語（Kotlin・Rust・シェルなど）は、行末の空白を消し、最後に改行を1つだけ置く
