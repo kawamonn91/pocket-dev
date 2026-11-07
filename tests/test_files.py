@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 
-from agent.files import FileService, FileServiceError, PathOutsideRootError, is_probably_binary
+from agent.files import FileService, FileServiceError, FileTooLargeError, PathOutsideRootError, is_probably_binary
 
 
 class FileServiceTestBase(unittest.TestCase):
@@ -123,7 +123,7 @@ class ListAndReadTest(FileServiceTestBase):
         with open(path, "wb") as f:
             f.write(b"%PDF-1.7\n")
         with unittest.mock.patch("agent.files.MAX_RAW_BYTES", 4):
-            with self.assertRaises(FileServiceError):
+            with self.assertRaises(FileTooLargeError):
                 self.service.read_bytes("big.pdf")
 
 

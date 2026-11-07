@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from . import auth, websocket
-from .files import FileService, FileServiceError, PathOutsideRootError
+from .files import FileService, FileServiceError, FileTooLargeError, PathOutsideRootError
 from .pty_session import PtySession
 
 log = logging.getLogger("pocket-dev")
@@ -176,6 +176,8 @@ class AgentHandler(BaseHTTPRequestHandler):
                 self._send_error_json(404, "不明なエンドポイントです")
         except PathOutsideRootError as e:
             self._send_error_json(403, str(e))
+        except FileTooLargeError as e:
+            self._send_error_json(413, str(e))
         except FileServiceError as e:
             self._send_error_json(400, str(e))
 
@@ -224,6 +226,8 @@ class AgentHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, **handler()})
         except PathOutsideRootError as e:
             self._send_error_json(403, str(e))
+        except FileTooLargeError as e:
+            self._send_error_json(413, str(e))
         except FileServiceError as e:
             self._send_error_json(400, str(e))
 
