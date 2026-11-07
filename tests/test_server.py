@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
+import unittest.mock
 import urllib.error
 import urllib.request
 
@@ -225,6 +226,20 @@ class FileApiTest(ServerTestBase):
         with self.assertRaises(urllib.error.HTTPError) as caught:
             self.get_json("/api/fs/read?path=nope.txt")
         self.assertEqual(caught.exception.code, 400)
+
+    def test_too_large_file_is_413(self):
+        self.post_json("/api/fs/write", {"path": "big.txt", "content": "0123456789"})
+        with unittest.mock.patch("agent.files.MAX_TEXT_BYTES", 4):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self.get_json("/api/fs/read?path=big.txt")
+        self.assertEqual(caught.exception.code, 413)
+
+    def test_too_large_raw_file_is_413(self):
+        self.post_json("/api/fs/write", {"path": "big.pdf", "content": "0123456789"})
+        with unittest.mock.patch("agent.files.MAX_RAW_BYTES", 4):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self.get_json("/api/fs/raw?path=big.pdf")
+        self.assertEqual(caught.exception.code, 413)
 
     def test_unknown_endpoint_is_404(self):
         with self.assertRaises(urllib.error.HTTPError) as caught:

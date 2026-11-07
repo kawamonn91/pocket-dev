@@ -23,6 +23,10 @@ class PathOutsideRootError(FileServiceError):
     """root の外を参照しようとした"""
 
 
+class FileTooLargeError(FileServiceError):
+    """開ける大きさの上限を超えた（HTTP では 413 で返す）"""
+
+
 class FileService:
     def __init__(self, root: str):
         self.root = os.path.realpath(root)
@@ -96,7 +100,7 @@ class FileService:
 
         size = os.path.getsize(target)
         if size > MAX_TEXT_BYTES:
-            raise FileServiceError(f"大きすぎて開けません ({size:,} バイト)")
+            raise FileTooLargeError(f"大きすぎて開けません（{MAX_TEXT_BYTES:,} バイトまで）")
 
         with open(target, "rb") as f:
             raw = f.read()
@@ -117,7 +121,7 @@ class FileService:
             raise FileServiceError(f"ファイルがありません: {rel_path}")
         size = os.path.getsize(target)
         if size > MAX_RAW_BYTES:
-            raise FileServiceError(f"大きすぎて開けません ({size:,} バイト)")
+            raise FileTooLargeError(f"大きすぎて開けません（{MAX_RAW_BYTES:,} バイトまで）")
         with open(target, "rb") as f:
             data = f.read()
         mime, _ = mimetypes.guess_type(target)
