@@ -21,3 +21,27 @@ gh pr merge --auto --merge   # build が通ったらマージする（マージ�
 ```
 
 CI が失敗したら、同じブランチに直して push すれば、もう一度 CI が走り、通ればそのままマージされる。
+
+## CD（`.github/workflows/release.yml`）
+
+`v1.2.3` の形のタグを push すると、ジョブ `release` が次を行う（pocket-dev には版の番号のファイルが無いので、タグがそのまま版になる）。
+
+1. 単体テスト
+2. Docker イメージを linux/amd64 と linux/arm64（Pocket Linux など）の 2 つで作り、GitHub Container Registry に置く
+   - `ghcr.io/kawamonn91/pocket-dev:1.2.3`・`:1.2`・`:latest`
+3. GitHub Releases を作る（`docker pull` の書き方を本文に書く）
+
+手で動かす（`gh workflow run release.yml --ref master`）と、イメージを作るまでにして、置かない・リリースも作らない（CD の動作確認用）。
+Secrets は使わない（GHCR へは GitHub が渡すトークンで書く）。
+
+最初に置いたとき、GHCR のパッケージが非公開になっていたら、GitHub のパッケージの設定（Package settings → Change visibility）で公開にする。
+
+### 新しい版を出す
+
+```bash
+git switch master && git pull --ff-only
+git tag v1.2.3 && git push origin v1.2.3
+gh run watch "$(gh run list --workflow release.yml --limit 1 --json databaseId -q '.[0].databaseId')"
+```
+
+置いたイメージは、`docker-compose.yml` の `build: .` の代わりに `image: ghcr.io/kawamonn91/pocket-dev:1.2.3` と書けば、ビルドせずに使える。

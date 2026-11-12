@@ -1,0 +1,96 @@
+# CD。v で始まるタグ（v1.0.0 など）を push すると、Docker イメージ（amd64 と arm64）を作って
+# GitHub Container Registry（ghcr.io/kawamonn91/pocket-dev）に置き、GitHub Releases も作る（docs/ci.md の「CD」）。
+# 手で動かした（workflow_dispatch）ときは、イメージを作るまでにして、置かない・リリースも作らない（CD の動作確認用）。
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/kawamonn91/pocket-dev
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      # アクションは改ざんに備えてコミットの SHA で固定する（コメントは版）
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # pocket-dev には版の番号のファイルが無いので、タグ（v1.2.3）の形だけを確かめる
+      - name: タグの形を確かめる
+        if: github.ref_type == 'tag'
+        run: |
+          if ! echo "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::タグは v1.2.3 の形にする（実際: $GITHUB_REF_NAME）"
+            exit 1
+          fi
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: 単体テストの実行
+        run: python -m unittest discover -s tests -t . -v
+
+      # スマホ・タブレット（Pocket Linux）の arm64 でも動くように、2 つのアーキテクチャで作る
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: GitHub Container Registry にログインする
+        if: github.ref_type == 'tag'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # タグ v1.2.3 → 1.2.3・1.2・latest。手で動かしたときはコミットの短い SHA（置かないので名前だけ）
+      - name: イメージのタグとラベルを決める
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            type=sha,enable=${{ github.ref_type != 'tag' }}
+
+      - name: イメージを作る（タグのときは置く）
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.ref_type == 'tag' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: リリースを作る
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" --target "$GITHUB_SHA" --title "pocket-dev $version" --notes "$(cat <<EOF
+          Docker イメージ（linux/amd64・linux/arm64、コミット $GITHUB_SHA）:
+
+          \`\`\`
+          docker pull $IMAGE:$version
+          \`\`\`
+
+          使い方は README（docker compose で動かすときは、docker-compose.yml の build: . の代わりに image: $IMAGE:$version を書く）。
+          EOF
+          )"
